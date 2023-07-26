@@ -3,35 +3,96 @@ import json
 import os
 from dotenv import load_dotenv
 
+load_dotenv("./.env")
 
-load_dotenv("C:/Users/Jack Semder/PycharmProjects/APIGatewayUpdate/.env")
+api_id = os.getenv("API_ID")
+prod_stage = os.getenv("PROD_STAGE") #prod
+dev_stage = os.getenv("DEV_STAGE") #dev
+export_type = "oas30"
+prod_region = os.getenv("AWS_REGION_PROD")
+dev_region = os.getenv("AWS_REGION_DEV")
 
-session = boto3.Session(region_name=os.getenv("AWS_REGION"), aws_access_key_id=os.getenv("ACCESS_KEY"),
+
+prod_session = boto3.Session(region_name=prod_region, aws_access_key_id=os.getenv("ACCESS_KEY"),
                       aws_secret_access_key=os.getenv("SECRET_KEY"))
-client = session.client('apigateway')
+prod_client = prod_session.client('apigateway')
 
+dev_session = boto3.Session(region_name=dev_region, aws_access_key_id=os.getenv("ACCESS_KEY"),
+                      aws_secret_access_key=os.getenv("SECRET_KEY"))
+dev_client = prod_session.client('apigateway')
 
-def export_api_stage(api_id, stage_name, export_type):
-    response = client.get_export(
+def export_api(api_id, stage_name, export_type):
+    response = prod_client.get_export(
         restApiId=api_id,
         stageName=stage_name, 
-        exportType=export_type
+        exportType=export_type,
+        parameters={'extensions': 'integrations'}
     )
     
     export_data = response['body'].read().decode('utf-8')
     return export_data
 
-api_id = os.getenv("API_ID")
-stage_name = os.getenv("STAGE_ID")
-export_type = "oas30"
+print(export_api(api_id, prod_stage, export_type))
+'''
+def get_lambda_arn(api_id, resource_id):
+    try:
+        response = prod_client.get_integration(
+            restApiId=api_id,
+            resourceId=resource_id,
+            httpMethod='POST'  
+        )
 
-export_data = export_api_stage(api_id, stage_name, export_type)
+        # Extract and return the Lambda function ARN from the integration response
+        #print(response['uri'])
+        return response['uri']
+    except prod_client.exceptions.NotFoundException:
+        print(f"Integration not found for API '{api_id}' and resource '{resource_id}'.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
 
-with open(f"{api_id}{stage_name}.json", "w") as f:
-    f.write(export_data)
+
+print(export_api(api_id, stage_name1, export_type))
+
+def import_api(api_id, stage_name, api_definition):
+    #with open(export_api(api_id, stage_name, export_type), 'r') as f:
+        #api_definition = f.read()
+
+    client.put_rest_api(
+        restApiId=api_id,
+        mode='overwrite',
+        body=api_definition
+    )
+
+    client.create_deployment(
+    restApiId=api_id,
+    stageName=stage_name
+)
 
 
+def compare():
+    prod = export_api()
+    dev = import_api()
 
+    if prod == dev:
+        pass
+
+def write_data():
+    export_data = export_api(api_id, stage_name1, export_type)
+
+    folder_path = "./apis"
+
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+
+    file_path = os.path.join(folder_path, f'{api_id}{stage_name1}.json')
+
+    with open(file_path, 'w') as file:
+        file.write(export_data)
+
+    import_api(api_id, stage_name2, export_data)
+
+write_data()
+'''
 '''
 access_key = os.getenv("ACCESS_KEY")
 secret_access_key = os.getenv("SECRET_KEY")
