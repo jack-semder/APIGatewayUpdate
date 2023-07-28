@@ -3,26 +3,29 @@ import json
 import os
 from dotenv import load_dotenv
 
+'''
+Purpose of this project is to export our staging prod API, analyze it and make changes if necessary, 
+compare it against our dev API, and then import the changed API.
+'''
 load_dotenv("./.env")
 
 api_id = os.getenv("API_ID")
-prod_stage = os.getenv("PROD_STAGE") #prod
-dev_stage = os.getenv("DEV_STAGE") #dev
+dev_stage = os.getenv("DEV_STAGE") 
+prod_stage = os.getenv("PROD_STAGE")
 export_type = "oas30"
-prod_region = os.getenv("AWS_REGION_PROD")
 dev_region = os.getenv("AWS_REGION_DEV")
 
 
-prod_session = boto3.Session(region_name=prod_region, aws_access_key_id=os.getenv("ACCESS_KEY"),
-                      aws_secret_access_key=os.getenv("SECRET_KEY"))
-prod_client = prod_session.client('apigateway')
-
 dev_session = boto3.Session(region_name=dev_region, aws_access_key_id=os.getenv("ACCESS_KEY"),
                       aws_secret_access_key=os.getenv("SECRET_KEY"))
-dev_client = prod_session.client('apigateway')
+dev_client = dev_session.client('apigateway')
 
+
+'''
+Exports prod api from AWS and returns as json.
+'''
 def export_api(api_id, stage_name, export_type):
-    response = prod_client.get_export(
+    response = dev_client.get_export(
         restApiId=api_id,
         stageName=stage_name, 
         exportType=export_type,
@@ -32,138 +35,82 @@ def export_api(api_id, stage_name, export_type):
     export_data = response['body'].read().decode('utf-8')
     return export_data
 
-print(export_api(api_id, prod_stage, export_type))
+#print(export_api(api_id, prod_stage, export_type))
+
 '''
-def get_lambda_arn(api_id, resource_id):
-    try:
-        response = prod_client.get_integration(
-            restApiId=api_id,
-            resourceId=resource_id,
-            httpMethod='POST'  
-        )
+Writes exported api to local file.
+'''
+def write_data():
+    current_path = os.getcwd()
+    print(f"Current path: {current_path}")
 
-        # Extract and return the Lambda function ARN from the integration response
-        #print(response['uri'])
-        return response['uri']
-    except prod_client.exceptions.NotFoundException:
-        print(f"Integration not found for API '{api_id}' and resource '{resource_id}'.")
-    except Exception as e:
-        print(f"An error occurred: {e}")
+    # Check if we are already in the desired folder
+    if current_path == "./apis":
+        pass
+    else:
+        try:
+            # Navigate to the desired folder
+            os.chdir("./apis")
+        except FileNotFoundError:
+            print("./apis not found")
+    exported_data = export_api(api_id, dev_stage, export_type)
+    with open(f'{api_id}_import.json', 'w') as file:
+        file.write(exported_data)
 
 
-print(export_api(api_id, stage_name1, export_type))
+'''
+Imports API to dev stage.
 
-def import_api(api_id, stage_name, api_definition):
-    #with open(export_api(api_id, stage_name, export_type), 'r') as f:
-        #api_definition = f.read()
+NOTE: 
+securitySchemes
+im_localRequest_authorizer
+im_jwt_authorizer
 
-    client.put_rest_api(
+
+In the exported API,these three pieces had an "x-amazon-apigateway-authtype: custom" 
+line that had to be removed in order for the API to be imported.
+'''
+def import_api():
+    current_path = os.getcwd()
+    if current_path == "./apis":
+        pass
+    else:
+        try:
+            # Navigate to the desired folder
+            os.chdir("./apis")
+        except FileNotFoundError:
+            print("./apis not found")
+    with open(f'{api_id}_import.json', 'r') as file:
+        api_content = file.read()
+
+    response = dev_client.put_rest_api(
         restApiId=api_id,
-        mode='overwrite',
-        body=api_definition
+        mode="overwrite",
+        body=api_content
     )
 
-    client.create_deployment(
-    restApiId=api_id,
-    stageName=stage_name
-)
+    return response
 
-
-def compare():
-    prod = export_api()
-    dev = import_api()
-
-    if prod == dev:
-        pass
-
-def write_data():
-    export_data = export_api(api_id, stage_name1, export_type)
-
-    folder_path = "./apis"
-
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-
-    file_path = os.path.join(folder_path, f'{api_id}{stage_name1}.json')
-
-    with open(file_path, 'w') as file:
-        file.write(export_data)
-
-    import_api(api_id, stage_name2, export_data)
-
-write_data()
 '''
+def create_test_api():
+    response = dev_client.create_rest_api(
+        name="Dev_Test_API_JS",
+        description="Test API for MIS-3131",
+        cloneFrom="8q1seu2r5g"
+    )
+
+    return response
 '''
-access_key = os.getenv("ACCESS_KEY")
-secret_access_key = os.getenv("SECRET_KEY")
-region = os.getenv("AWS_REGION")
 
-# Create connection
-client = boto3.client('apigateway', region_name=region, aws_access_key_id=access_key,
-                      aws_secret_access_key=secret_access_key)
+def dev_vs_prod():
+    prod = export_api(api_id, prod_stage, export_type)
+    dev = export_api(api_id, dev_stage, export_type)
 
-api_id = os.getenv("API_ID")
-resource_id = os.getenv("RESOURCE_ID")
-apis = client.get_rest_apis()
+    prod_json_str = json.dumps(prod, sort_keys=True)
+    dev_json_str = json.dumps(dev, sort_keys=True)
 
+    assert prod_json_str == dev_json_str, "The 'prod' and 'dev' JSON objects are not equal."
 
-def api_info(): # get methods
-    for api in apis["items"]:
-        api_id = api["id"]
-        api_name = api["name"]
-
-        print(f"API: {api_name} ({api_id})")
-
-        resources = client.get_resources(restApiId=api_id)
-        #print(resources)
-
-        for resource in resources["items"]:
-            resource_id = resource["id"]
-            resource_path = resource["path"]
-
-            print(f" Resource: {resource_path} ({resource_id})")
-
-def extract_lambda():
-    response = client.get_resources(restApiId=api_id)
-
-
-    # Iterate over the resources to find the Lambda integration
-    for item in response['items']:
-        resource = item['id']
-
-
-        # Get the resource methods
-        resource_methods = client.get_resource(
-            restApiId=api_id,
-            resourceId=resource
-        )
-
-        #print(resource_methods['items'])
-
-
-        for http_method, method_details in resource_methods.items():
-            print("http_method: ", http_method)
-            print("method_details: ", method_details)
-            
-            integration_id = method_details.get('methodIntegration', {}).get('integrationId')
-            print("integration id: ", integration_id)
-
-            if integration_id:
-                # Get the integration details
-                integration = client.get_integration(
-                    restApiId=api_id,
-                    resourceId=resource,
-                    httpMethod=http_method,
-                    integrationId=integration_id
-                )
-                print("integration: ", integration)
-
-                # Check if the integration type is "AWS_PROXY"
-                if integration['type'] == 'LAMBDA_PROXY':
-                    lambda_function_arn = integration['uri']
-                    print("arn: ", lambda_function_arn)
-
-        if 'lambda_function_arn' in locals():
-            # Lambda function ARN found, break the outer loop
-            break
-'''
+#dev_vs_prod()
+#print("after write, before import")
+import_api()
